@@ -1,0 +1,289 @@
+<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Quantum Seed Generator — Dokumentation</title><style>
+body{font-family:Georgia,'Times New Roman',serif;max-width:860px;margin:2em auto;
+     padding:0 1.5em;color:#1a1a1a;line-height:1.55;background:#fdfdfa}
+h1{color:#b45309;border-bottom:3px solid #b45309;padding-bottom:.3em;font-size:1.7em}
+h2{color:#0e7490;border-bottom:1px solid #0e7490;padding-bottom:.2em;margin-top:1.8em}
+h3{color:#334155;margin-top:1.3em}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.92em}
+th{background:#0e7490;color:#fff;text-align:left;padding:.45em .6em}
+td{border:1px solid #cbd5e1;padding:.45em .6em;vertical-align:top}
+tr:nth-child(even) td{background:#f1f5f9}
+code,pre{font-family:'Courier New',monospace;background:#eef2f7;color:#0f172a;border-left:4px solid #0e7490}
+pre{padding:.8em 1em;border-radius:4px;overflow-x:auto;font-size:.9em;font-weight:600}
+.note{background:#ecfeff;border-left:4px solid #0e7490;padding:.7em 1em;margin:1em 0}
+.warn{background:#fef2f2;border-left:4px solid #dc2626;padding:.7em 1em;margin:1em 0}
+ul{margin:.4em 0 1em 1.2em}
+li{margin:.25em 0}
+@media print{body{max-width:none;margin:0;font-size:11pt}h1{page-break-before:avoid}
+h2{page-break-after:avoid}table,pre,.note,.warn{page-break-inside:avoid}}
+</style></head><body>
+<h1>QUANTUM SEED GENERATOR v1.0 — Systemdokumentation</h1>
+<p>Hardware-Entropie-basierter BIP39-Seed-Generator auf Raspberry Pi 5. Stand: August 2026. Diese Dokumentation beschreibt Zweck, Aufbau, Kryptographie und Sicherheitsarchitektur des Systems.</p>
+<h2>1. Zweck und Funktionsbeschreibung</h2>
+<p>Der QUANTUM SEED GENERATOR erzeugt BIP39-Seed-Phrasen (12 oder 24 Wörter) für Bitcoin-Wallets aus vier voneinander unabhängigen physikalischen Entropiequellen. Das System läuft vollständig offline auf einem Raspberry Pi 5, verarbeitet alle Geheimnisse ausschließlich im Arbeitsspeicher und hinterlässt keine Spuren auf Datenträgern. Die erzeugte Wortfolge ist standardkonform und kann in jede BIP39-kompatible Wallet importiert werden — Hardware-Wallets wie ColdCard, Trezor, Ledger, OneKey, BitBox ebenso wie Software-Wallets wie Electrum, Sparrow, Trust Wallet, BlueWallet u. v. a.: Der Standard garantiert, dass wirklich jede kompatible Wallet dieselben Schluessel ableitet.</p>
+<ul><li>Vier Entropiequellen: radioaktiver Zerfall, IR-Sensorrauschen, Hardware-RNG, Würfel</li><li>Zweisprachige Programmführung (Deutsch/Englisch) mit Standard- und Transparenz-Modus</li><li>Vollständige Nachvollziehbarkeit: im Transparenz-Modus sind alle Rohdaten und Hashes live sichtbar</li><li>Erzwungene Offline-Umgebung: WLAN/Bluetooth-Abschaltung (rfkill + Firmware), Ethernet-Kabelprüfung</li><li>Hardware-Healthcheck, statistische Zerfallsprüfung, Papier-Verifikation der Abschrift</li><li>Spurenfreier Abschluss: Bildschirm-/Scrollback-Löschung, optionale History-Bereinigung</li></ul>
+<h2>2. Stärken gegenüber der Seed-Erzeugung in Standard-Hardware-Wallets</h2>
+<p>Handelsübliche Hardware-Wallets erzeugen den Seed aus einem einzigen, proprietären Chip-Zufallsgenerator, dessen Funktionsweise der Nutzer weder einsehen noch prüfen kann. Dieses System verfolgt den entgegengesetzten Ansatz:</p>
+<table><tr><th>Aspekt</th><th>Hardware-Wallet</th><th>Dieses System</th></tr>
+<tr><td>Entropiequellen</td><td>1 (Chip-RNG, Blackbox)</td><td>4 unabhängige, davon 1 quantenphysikalisch (Zerfall) und 1 hardwareunabhängig (Würfel)</td></tr>
+<tr><td>Prüfbarkeit</td><td>keine (Closed Source/Silizium)</td><td>vollständig: Open-Source-Skript, Transparenz-Modus zeigt jeden Zwischenwert</td></tr>
+<tr><td>RNG-Backdoor-Risiko</td><td>Totalausfall der Sicherheit</td><td>wirkungslos: HMAC-Kombinierer mit Würfeln als unabhängigem Schlüssel</td></tr>
+<tr><td>Entropie-Nachweis</td><td>Herstellerangabe</td><td>konservativ bilanziert und erzwungen (mind. 2× Ziel)</td></tr>
+<tr><td>Lieferketten-Angriff</td><td>Gerät könnte manipuliert ankommen</td><td>Standardkomponenten, selbst zusammengestellt, Verhalten messbar</td></tr>
+<tr><td>Seed-Anzeige-Umgebung</td><td>Gerätedisplay</td><td>erzwungene Offline-Prüfung unmittelbar vor Anzeige (Manipulationserkennung)</td></tr>
+</table>
+<div class="note">Wichtig zur Einordnung: Eine hochwertige Hardware-Wallet ist für die Aufbewahrung und Signierung weiterhin sinnvoll. Dieses System ersetzt nur den Schritt der Seed-ERZEUGUNG durch einen transparenten, mehrquelligen Prozess — der fertige Seed kann anschließend in eine Hardware-Wallet importiert werden.</div>
+<h2>3. Technische Komponenten</h2>
+<table><tr><th>Komponente</th><th>Typ / Modell</th><th>Aufgabe</th></tr>
+<tr><td>Einplatinencomputer</td><td>Raspberry Pi 5 (BCM2712), Raspberry Pi OS</td><td>Ausführung, Messwerterfassung, Kryptographie</td></tr>
+<tr><td>Geigerzähler</td><td>RadiationD-v1.1 (CAJOE) mit J315-Zählrohr</td><td>Quantenentropie: Zeitpunkte radioaktiver Zerfälle (Hintergrundstrahlung)</td></tr>
+<tr><td>Wärmebildsensor</td><td>MLX90640 (32×24 Thermopile, I2C 0x33)</td><td>Sensorrauschen: unkalibrierte ADC-Rohframes</td></tr>
+<tr><td>Hardware-RNG</td><td>BCM2712 TRNG (/dev/hwrng)</td><td>5 × 512 Bit in Einzelproben mit thermischer Anregung dazwischen; Qualitätsprüfung pro Probe</td></tr>
+<tr><td>Würfel</td><td>Präzisionswürfel (kasinotauglich empfohlen)</td><td>hardwareunabhängige letzte Quelle, HMAC-Schlüssel</td></tr>
+<tr><td>Widerstand</td><td>10 kΩ (Signalleitung CAJOE)</td><td>Strombegrenzung/Schutz des GPIO-Eingangs</td></tr>
+<tr><td>Software</td><td>btc_seedgen.py + install_seedgen.py (Python 3, lgpio, smbus2)</td><td>Erfassung, Prüfungen, Kombination, BIP39-Kodierung</td></tr>
+</table>
+<h2>4. Technische Verdrahtung</h2>
+<p>Alle Angaben beziehen sich auf den 40-Pin-Header des Raspberry Pi 5 (physische Pin-Nummern; Orientierung: USB/Ethernet nach unten, Pin 1 oben links, Ecke nächst SD-Karte). Der vollständige Plan mit allen 40 Pins ist im Installationsskript abrufbar: python3 install_seedgen.py --pinout</p>
+<h3>MLX90640 IR-Kamera</h3>
+<table><tr><th>Kamera-Leitung</th><th>Pi-Pin</th><th>Funktion</th></tr>
+<tr><td>VCC (gelb)</td><td>Pin 1</td><td>3,3 V — niemals 5 V!</td></tr>
+<tr><td>SDA (violett)</td><td>Pin 3</td><td>GPIO2 / I2C1 SDA</td></tr>
+<tr><td>SCL (grün)</td><td>Pin 5</td><td>GPIO3 / I2C1 SCL</td></tr>
+<tr><td>GND (blau)</td><td>Pin 6</td><td>Masse</td></tr>
+</table>
+<h3>CAJOE-Geigerzähler</h3>
+<table><tr><th>Verbindung</th><th>Pi-Pin</th><th>Hinweis</th></tr>
+<tr><td>5-V-Versorgung</td><td>Pin 2 (oder eigenes USB-Netzteil)</td><td>Board-Versorgung</td></tr>
+<tr><td>GND</td><td>Pin 9</td><td>gemeinsame Masse zwingend</td></tr>
+<tr><td>Signal (weiß)</td><td>Pin 11 (GPIO17)</td><td>Abgriff an P3-VIN, 10 kΩ in Reihe; entscheidend: GPIO17 biasfrei (Pull None) — vom Installationsskript dauerhaft gesetzt (gpio=17=ip,pn)</td></tr>
+</table>
+<h2>5. Kryptographie des Seed-Erzeugungsprozesses</h2>
+<h3>5.1 Abstrakte Erklärung</h3>
+<p>Man kann sich den Prozess wie das Anrühren einer unfälschbaren Farbe vorstellen: Vier Personen, die einander nicht kennen, geben je einen eigenen, geheimen Farbton in einen Mixer (Zerfalls-Timing, Kamerarauschen, Chip-Zufall, Würfel). Der Mixer (Hash-Funktion) verrührt alles so gründlich, dass aus der Mischfarbe keiner der Ausgangstöne rekonstruierbar ist — und schon ein einziges anderes Farbmolekül eine komplett andere Mischfarbe ergäbe. Entscheidend: Selbst wenn drei der vier Personen heimlich zusammenarbeiten und ihre Töne absprechen, bleibt die Mischfarbe unvorhersagbar, solange die vierte ehrlich ist. Die Würfel spielen dabei eine Sonderrolle: Sie sind der &#x27;Schlüssel zum Mixer&#x27; — eine Quelle, die kein Chiphersteller, keine Firmware und kein Lieferant je beeinflussen konnte, weil sie aus der Hand des Nutzers kommt.</p>
+<h3>5.2 Technische Erklärung — Schritt für Schritt</h3>
+<p>Schritt 1 — Erfassung der Rohdaten. Jede Quelle liefert vollständige Rohdaten: der HWRNG 5 × 64 Bytes in Einzelproben (mit thermischer CPU-Anregung zwischen den Proben); der Geigerzähler die Kernel-Zeitstempel aller Zerfallsereignisse in Nanosekunden (je 8 Bytes, Interrupt-genau); die Kamera komplette unkalibrierte RAM-Frames (832 16-Bit-Worte = 1664 Bytes pro Frame, nur Frames mit ≥ 85 % Pixeländerung gegenüber dem letzten akzeptierten Frame); die Würfel die vollständige Wurffolge als Basis-6-Zahl.</p>
+<p>Schritt 2 — Domain-separiertes Hashing pro Quelle. Jede Quelle wird einzeln durch SHA-512 verdichtet. Ein Domänen-Präfix und ein Längenfeld verhindern, dass Daten einer Quelle als andere Quelle interpretiert werden können (Format-Eindeutigkeit):</p>
+<pre>H_x   = SHA-512( &quot;BTC-SEEDGEN-v1&quot; || tag_x || len64(daten_x) || daten_x )
+tags  : hwrng, decay, cam, dice, os</pre>
+<p>Schritt 3 — Hardware-Pool. Die drei Hardware-Digests werden zusammen mit einem zusätzlichen Betriebssystem-Beitrag (os.urandom(64), Defense-in-Depth) erneut gehasht:</p>
+<pre>H_os  = SHA-512( DOM || &quot;os&quot;   || len || os.urandom(64) )
+POOL  = SHA-512( DOM || &quot;pool&quot; || H_hw || H_dec || H_cam || H_os )</pre>
+<p>Schritt 4 — HMAC-Kombination mit den Würfeln als Schlüssel. Der Kern des Schemas: HMAC-SHA512 ist ein beweisbar robuster Zwei-Quellen-Kombinierer. Das Ergebnis ist unvorhersagbar, solange MINDESTENS EINE Seite (Schlüssel oder Nachricht) unvorhersagbar ist. Damit retten die Würfel den Seed selbst bei vollständig kompromittierter Hardware — und umgekehrt:</p>
+<pre>FINAL = HMAC-SHA512( key = H_dice , msg = POOL )        # 512 Bit</pre>
+<p>Schritt 5 — Entropie-Extraktion und BIP39-Kodierung. Für 24 Wörter werden die ersten 256 Bit von FINAL entnommen (Präfix einer PRF-Ausgabe ist selbst PRF-Ausgabe — verlustfrei sicher, gleiches Prinzip wie SHA-512/256). Daran wird die BIP39-Checksumme angehängt (erste ENT/32 = 8 Bit von SHA-256(ENTROPY)); die 264 Bit werden in 24 Gruppen à 11 Bit zerlegt, jede Gruppe indiziert ein Wort der offiziellen, per SHA-256 verifizierten Wortliste (2048 Wörter).</p>
+<p>Schritt 6 — Wallet-Seite (außerhalb dieses Systems). Beim Import führt die Wallet standardkonform PBKDF2-HMAC-SHA512 mit 2048 Iterationen aus (Mnemonic + optionale Passphrase) und leitet daraus per BIP32/BIP84 die Schlüssel ab. Iterationen im Generator selbst wären Sicherheitstheater: Key-Stretching hilft nur schwachen Geheimnissen — 256 Bit echte Entropie brauchen keine Streckung.</p>
+<h3>5.3 Die Entropiequellen und ihr Beitrag zur Gesamtsicherheit</h3>
+<table><tr><th>Quelle</th><th>Physikalischer Ursprung</th><th>Konservative Kreditierung</th><th>Besonderer Wert</th></tr>
+<tr><td>Radioaktiver Zerfall</td><td>Quantenmechanik: Zerfallszeitpunkt prinzipiell unvorhersagbar</td><td>2 Bit/Ereignis, mind. 128 Ereignisse (= 256 Bit)</td><td>einzige Quelle mit fundamentaler (nicht nur praktischer) Unvorhersagbarkeit; Poisson-Statistik prüfbar</td></tr>
+<tr><td>IR-Sensorrauschen</td><td>thermisches Rauschen + ADC-Quantisierung über 768 Pixel</td><td>64 Bit/Frame, mind. 12 Frames; 85-%-Filter erzwingt Frische</td><td>hohe Datenrate; Nutzerbewegung (Hand) koppelt makroskopische Unvorhersagbarkeit ein</td></tr>
+<tr><td>BCM2712 HWRNG</td><td>Chip-interner TRNG</td><td>512 Bit roh, 256 kreditiert; Monobit-/Diversitätsprüfung</td><td>etablierte Grundversorgung; als EINE von vier Quellen unkritisch selbst bei Defekt</td></tr>
+<tr><td>Würfel</td><td>Chaotische Mechanik in Nutzerhand</td><td>log2(6) ≈ 2,585 Bit/Wurf, mind. 52 Würfe (≈ 134 Bit), 100 empfohlen (≈ 258 Bit)</td><td>hardware- und lieferkettenunabhängig; HMAC-Schlüssel = letzte Verteidigungslinie</td></tr>
+</table>
+<p>Sicherheitsaussage des Kombinierers: Die Gesamtentropie des Seeds ist min(Eingangsentropie, 256 Bit), und ein Angreifer müsste ALLE vier Quellen gleichzeitig vorhersagen können. Die Bilanz erzwingt zusätzlich, dass die konservativ kreditierte Summe mindestens das Doppelte des Ziels beträgt.</p>
+<h3>5.4 Detaillierter Prozessablauf mit Illustrationen und Rechenbeispielen</h3>
+<p>Dieser Abschnitt geht jede Phase einzeln durch — mit Datenfluss-Diagrammen, konkreten Byte-Layouts und nachrechenbaren Zahlenbeispielen. Alle Beispielwerte wurden maschinell mit denselben Algorithmen berechnet, die auch das Skript verwendet.</p>
+<h3>5.4.1 Gesamt-Datenfluss</h3>
+<pre>  Phase 1          Phase 2            Phase 3           Phase 4
+ ┌────────┐     ┌───────────┐     ┌────────────┐     ┌─────────┐
+ │ HWRNG  │     │ Geiger-   │     │ MLX90640   │     │ Wuerfel │
+ │ 5x64 B │     │ zaehler   │     │ IR-Kamera  │     │ &gt;=52    │
+ │        │     │ &gt;=128 Ev. │     │ &gt;=12 Frames│     │ Wuerfe  │
+ └───┬────┘     └────┬──────┘     └────┬───────┘     └────┬────┘
+     │ SHA-512       │ SHA-512         │ SHA-512          │ SHA-512
+     ▼               ▼                 ▼                  ▼
+   H_hw            H_dec             H_cam              H_dice
+     │               │                 │                  │
+     └───────┬───────┴───────┬─────────┘                  │
+             │      H_os (os.urandom 64 B, SHA-512)       │
+             ▼               │                            │
+        POOL = SHA-512(H_hw ‖ H_dec ‖ H_cam ‖ H_os)       │
+             │                                            │
+             └────────────┬───────────────────────────────┘
+                          ▼
+        FINAL = HMAC-SHA512(key = H_dice, msg = POOL)   [512 Bit]
+                          │
+                          ▼  erste 256 Bit (24 Woerter)
+        ENTROPY ─► BIP39: + Checksumme ─► 24 x 11 Bit ─► Wortliste</pre>
+<p>Lesart: Die vier Quellen laufen getrennt durch domänen-separierte Hashes. Drei Hardware-Quellen und der OS-Beitrag bilden den Pool (Nachricht), die Würfel bleiben bewusst außerhalb und werden erst als HMAC-Schlüssel eingekoppelt — dadurch genügt EINE ehrliche Seite für einen sicheren Seed.</p>
+<h3>5.4.2 Phase 1 — HWRNG: 5 Proben, thermische Anregung, Monobit-Beispiel</h3>
+<p>Aus /dev/hwrng werden fünf Proben à 64 Bytes gelesen — mit jeweils 2 Sekunden Abstand. In jeder Pause heizt ein zeitboxierter SHA-512-Burst die CPU auf: Die nächste Probe entsteht so unter veränderten physikalischen Bedingungen (Die-Temperatur, Versorgungslast) — der Jitter der TRNG-Ringoszillatoren ist temperatur- und spannungsabhängig. Das ist Dekorrelations-Verstärkung nach demselben Prinzip wie die Handbewegung vor der Kamera, ausdrücklich KEINE zusätzliche Entropiequelle. Es entschärft insbesondere die Schwächeklasse &#x27;RNG direkt nach dem Kaltstart noch nicht warmgelaufen&#x27;.</p>
+<pre>Ablauf Phase 1:
+  Probe 1 (64 B) -&gt; Pruefung -&gt; 2 s Hash-Burst (heizt CPU)
+  Probe 2 (64 B) -&gt; Pruefung -&gt; 2 s Hash-Burst
+  ...            -&gt; ...      -&gt; ...
+  Probe 5 (64 B) -&gt; Pruefung -&gt; Kreuzvergleich aller 5 Proben
+
+Pruefungen PRO Probe:            Kreuzvergleich:
+  Diversitaet &gt;= 32 Bytewerte      alle 5 Proben paarweise verschieden
+  Monobit 30-70 % Einsen           (haengender RNG fliegt sofort auf)
+
+Jitter-Beiprodukt (unkreditiert, 0 Bit): pro Pause werden erreichte
+SHA-512-Iterationszahl + exakte Dauer in ns geerntet (Scheduler-/Cache-
+Jitter) und den Rohdaten angehaengt: 5 x 64 B + 4 x 16 B = 384 B in den
+Hash. Kreditiert bleiben konservativ 256 Bit — die thermische Anregung
+ist Qualitaetsmarge, kein Bilanzposten.</pre>
+<pre>Rechenbeispiel Monobit (je Probe, Beispiellauf):
+  512 Bit gelesen, davon Einsen gezaehlt: 259
+  Erwartung bei fairem RNG:  256          (= 512 x 0,5)
+  Standardabweichung sigma:  sqrt(512 x 0,5 x 0,5) = 11,31
+  Abweichung: |259 - 256| = 3  =  0,27 sigma   -&gt;  BESTANDEN
+  (Abbruchbereich erst bei grober Schieflage, z. B. 340 Einsen = 7,4 sigma)</pre>
+<h3>5.4.3 Phase 2 — Radioaktiver Zerfall: vom Impuls zum Byte</h3>
+<p>Jede Detektion eines Zerfallsprodukts erzeugt am P3-VIN-Abgriff einen Impuls; der Kernel liefert dazu einen monotonen Zeitstempel in Nanosekunden. Gehasht werden die vollständigen 8-Byte-Zeitstempel aller Ereignisse — nicht nur Differenzen oder einzelne Bits.</p>
+<pre>Beispiel (echte Messreihe, ~15 CPM):
+  Ereignis   Zeitstempel t [ns]       Delta zum Vorgaenger
+  1          35806374994711           --
+  2          35807625077266           1,250 s
+  3          35812116678703           4,492 s
+  4          35816465826823           4,349 s
+  5          35820107988436           3,642 s
+
+  Byte-Strom an SHA-512 (big-endian, 8 B je Ereignis):
+  00 00 20 91 5f 8e 3b 57 | 00 00 20 91 aa 03 76 12 | ...
+  Die Unvorhersagbarkeit steckt in den niederwertigen Bytes: selbst bei
+  bekannter MITTLERER Rate ist der exakte Nanosekunden-Zeitpunkt jedes
+  einzelnen Zerfalls quantenmechanisch offen.</pre>
+<p>Kreditiert werden konservativ nur 2 Bit pro Ereignis, obwohl die Nanosekunden-Zeitstempel real deutlich mehr tragen — Sicherheitsmarge nach unten. Für 24 Wörter (256-Bit-Ziel) sind daher mindestens 128 Ereignisse Pflicht: 128 × 2 Bit = 256 Bit allein aus dieser Quelle.</p>
+<pre>Statistik-Wächter (Audit M4) — Rechenbeispiel mit 128 Intervallen:
+  Mittelwert m = 4,0 s  -&gt;  CPM = 60/m = 15
+  (1) Plausibilitaetsfenster:      1 &lt;= 15 &lt;= 3000            BESTANDEN
+  (2) Variationskoeffizient:  CV = s/m = 3,8/4,0 = 0,95 ~ 1   BESTANDEN
+      (Exponentialverteilung hat CV = 1; 50-Hz-Brumm mit Jitter
+       haette z. B. CV = 0,05  -&gt;  SOFORTABBRUCH)
+  (3) Chi-Quadrat gegen Exponentialverteilung, 8 gleichwahrscheinliche
+      Klassen, erwartet je 16:
+      beobachtet: 14 18 15 17 16 13 19 16
+      chi2 = (4+4+1+1+0+9+9+0)/16 = 1,75  &lt;  24 (Grenze)      BESTANDEN</pre>
+<h3>5.4.4 Phase 3 — IR-Kamera: Frame-Aufbau und 85-%-Filter</h3>
+<pre>Ein MLX90640-Rohframe (unkalibrierter RAM-Auszug):
+  832 Worte x 16 Bit = 1664 Bytes
+  = 768 Pixel-ADC-Werte (32 x 24 Thermopile)
+  + 64 Kontroll-/Kalibrierworte
+
+  Beispiel-Pixelwerte (hex):  fff2  0011  ffe9  002a  0007 ...
+  Die Entropie sitzt in den untersten Bits (thermisches Rauschen +
+  ADC-Quantisierung) — gehasht wird trotzdem IMMER das komplette Frame.
+
+  85-%-Filter (Frische-Zwang) — Beispiel:
+  Vergleich neues Frame vs. letztes AKZEPTIERTES Frame:
+    veraenderte Worte: 731 von 832  -&gt;  Diff = 87,9 %  &gt;= 85 %  AKZEPTIERT
+    veraenderte Worte: 615 von 832  -&gt;  Diff = 73,9 %  &lt;  85 %  VERWORFEN</pre>
+<p>Der Filter erzwingt, dass jedes kreditierte Frame substanziell neue Information trägt (Nutzer bewegt die Hand vor der Optik). Ein getrennter Wächter erkennt eingefrorene Sensorik (200 Frames &lt; 5 % Differenz), und ein 5-Minuten-Geduldsfenster gibt dem Menschen Zeit, ohne bei kurzem Zögern abzubrechen. Kreditierung: konservativ 64 Bit pro akzeptiertem Frame; Minimum 12 Frames = 768 Bit.</p>
+<h3>5.4.5 Phase 4 — Würfel: Basis-6-Kodierung Schritt für Schritt</h3>
+<p>Die Wurffolge wird als EINE große Zahl im Stellenwertsystem zur Basis 6 kodiert (Augenzahl minus 1 je Stelle) und zusammen mit der Wurfanzahl byteweise gehasht — verlustfrei und eindeutig:</p>
+<pre>Beispiel mit 4 Wuerfen:  4, 1, 5, 2
+  Ziffern (Auge-1):      3, 0, 4, 1
+  Wert = ((3*6 + 0)*6 + 4)*6 + 1
+       = (18*6 + 4)*6 + 1 = 112*6 + 1 = 673
+  Byte-Kodierung: [Anzahl als 4 B] [Wert big-endian]
+                = 00 00 00 04 | 02 a1              (0x02a1 = 673)
+
+Entropie pro Wurf: log2(6) = 2,585 Bit
+   52 Wuerfe  -&gt;  52  x 2,585 = 134,4 Bit   (erzwungenes Minimum, &gt; 128!)
+  100 Wuerfe  -&gt;  100 x 2,585 = 258,5 Bit   (Empfehlung: volle 256-Bit-
+                                             Unabhaengigkeit von JEDER Hardware)</pre>
+<h3>5.4.6 Domain-Separation: das Byte-Layout der Hash-Eingaben</h3>
+<pre>Jede Quelle wird exakt so an SHA-512 uebergeben:
+
+  ┌───────────────────┬─────────┬─────────────────┬──────────────┐
+  │ &quot;BTC-SEEDGEN-v1&quot;  │ tag     │ len(daten) 8 B  │ daten        │
+  │ 14 B Domaene      │ z.B.    │ big-endian      │ variabel     │
+  │                   │ &quot;decay&quot; │                 │              │
+  └───────────────────┴─────────┴─────────────────┴──────────────┘
+
+Warum? Ohne Praefixe koennte ein Byte-Strom aus Quelle A als Quelle B
+interpretiert werden (Kollision der Formate). Mit Domaene + Tag + Laenge
+ist jede Eingabe global eindeutig — auch gegenueber anderen Programmen,
+die SHA-512 verwenden.</pre>
+<h3>5.4.7 Der HMAC-Kombinierer im Inneren</h3>
+<pre>HMAC-SHA512(K, m) = H( (K&#x27; xor opad) ‖ H( (K&#x27; xor ipad) ‖ m ) )
+
+                 K = H_dice (64 B)          m = POOL (64 B)
+                        │                        │
+        ┌───────────────┴────────┐               │
+        ▼                        ▼               ▼
+   K&#x27; xor ipad ──► [ innerer Hash  H( ipad-Key ‖ POOL ) ]
+   K&#x27; xor opad ──► [ aeusserer Hash H( opad-Key ‖ innerer ) ] ─► FINAL
+
+Sicherheitseigenschaft (Zwei-Quellen-Kombinierer):
+  unvorhersagbarer SCHLUESSEL  + bekannte Nachricht   -&gt; FINAL unvorhersagbar
+  bekannter Schluessel         + unvorhersagbare NACHRICHT -&gt; ebenfalls
+  -&gt;  Ein Angreifer muesste Wuerfel UND alle Hardware-Quellen beherrschen.</pre>
+<p>Genau deshalb wäre einfaches XOR die schwächere Wahl: XOR ist zwar auch ein Kombinierer, aber anfällig, wenn eine Quelle die andere adaptiv beobachten könnte; die Hash-/HMAC-Konstruktion vernichtet jede Struktur der Eingaben und ist gegen solche Abhängigkeiten robust.</p>
+<h3>5.4.8 BIP39-Kodierung: vollständig durchgerechnetes Beispiel</h3>
+<p>Zur Nachvollziehbarkeit hier der offizielle BIP39-Testvektor mit 128-Bit-Entropie aus lauter Nullbytes (im echten Lauf steht hier ENTROPY = FINAL[:32]; das Rechenschema ist identisch, bei 24 Wörtern mit 256+8 Bit und 8-Bit-Checksumme):</p>
+<pre>Schritt 1 — Entropie:
+  ENT (128 Bit) = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+Schritt 2 — Checksumme:
+  SHA-256(ENT) = 374708fff7719dd5979ec875d56cd228...
+  erstes Byte  = 0x37 = 00110111b
+  CS = erste ENT/32 = 4 Bit = 0011b = 3
+
+Schritt 3 — Konkatenation ENT ‖ CS  (132 Bit) und Teilung in 12 x 11 Bit:
+  [00000000000] [00000000000] ... (11 Gruppen) ... [00000000011]
+  Indizes: 0 0 0 0 0 0 0 0 0 0 0 3
+
+Schritt 4 — Wortliste (Zeile = Index + 1):
+  Index 0 -&gt; abandon (x11),  Index 3 -&gt; about
+  Mnemonic: abandon abandon abandon abandon abandon abandon
+            abandon abandon abandon abandon abandon about
+  = offizieller BIP39-Testvektor  -&gt;  Rechenweg verifiziert</pre>
+<p>Der letzte 11-Bit-Block enthält die 4 Checksummen-Bits als niederwertige Bits — deshalb endet der Nullvektor nicht auf &#x27;abandon&#x27;, sondern auf &#x27;about&#x27; (Index 3). Jede BIP39-Wallet weltweit führt exakt dieselbe Rechnung aus und erkennt Tippfehler über diese Checksumme (bei 24 Wörtern werden 8 von 264 Bit geprüft; grobe Fehler fallen zusätzlich der Wortlisten-Suche auf).</p>
+<h3>5.4.9 Wallet-Seite: von der Wortfolge zu den Adressen</h3>
+<pre>Mnemonic (+ optionale Passphrase)
+        │  PBKDF2-HMAC-SHA512, 2048 Iterationen, Salt = &quot;mnemonic&quot;+Pass
+        ▼
+   512-Bit-Wallet-Seed
+        │  BIP32: HMAC-SHA512(&quot;Bitcoin seed&quot;, Seed) -&gt; Master-Key + Chaincode
+        ▼
+   m / 84&#x27; / 0&#x27; / 0&#x27; / 0 / i     (BIP84, Native SegWit)
+        │   │    │    │   │ └─ Adress-Index i = 0,1,2, ...
+        │   │    │    │   └─── extern (0) / Wechselgeld (1)
+        │   │    │    └─────── Konto 0
+        │   │    └──────────── Coin: Bitcoin (0)
+        │   └───────────────── Zweck: BIP84
+        ▼
+   Private Keys  -&gt;  Public Keys (secp256k1)  -&gt;  bc1q...-Adressen
+
+Import-Referenz Electrum (offline): Options -&gt; BIP39, Pfad m/84&#x27;/0&#x27;/0&#x27;</pre>
+<h2>6. Sicherheitsmechanismen des Python-Skripts</h2>
+<h3>Vor dem Start</h3>
+<ul><li>Sicherheitsregel-Box mit Pflichtbestätigung (Offline-Regeln, Smart-TV-Verbot, keine Handys/Kameras/Dritte im Raum)</li><li>Root-Prüfung mit klarer sudo-Anleitung; Abbruch bei python3 -O (Selbsttests würden sonst unvollständig laufen)</li><li>SSH-/tmux-/screen-Erkennung (Seed dürfte sonst das Gerät verlassen bzw. mitgeschnitten werden)</li><li>Erzwungene Funk-Abschaltung: rfkill sofort + dtoverlay-Einträge (Firmware-Ebene, ab Boot) — mit Verifikation</li><li>Ethernet-Kabel-Pflichtprüfung: Link-Erkennung, Zieh-Aufforderung, technische Nachmessung der Bestätigung</li><li>Swap-Deaktivierung (RAM-Inhalte können nicht auf die SD-Karte auslaufen), Core-Dumps deaktiviert (RLIMIT_CORE=0)</li><li>Kryptographischer Selbsttest mit offiziellen BIP39-Vektoren vor jedem Lauf; Wortlisten-SHA-256-Verifikation</li><li>Hardware-Healthcheck: je 10 Live-Signale pro Quelle mit Anzeige, inkl. Messung der realen Zählrate für ehrliche Dauerprognosen</li></ul>
+<h3>Während der Erzeugung</h3>
+<ul><li>Erzwungene Minima: ≥128 Zerfallsereignisse (24 Wörter), ≥12 Kamera-Frames, ≥52 Würfe; Entropie-Bilanz ≥ 2× Ziel</li><li>Statistische Zerfallsprüfung (Audit M4): CPM-Plausibilitätsfenster, Variationskoeffizient, Chi-Quadrat gegen Exponentialverteilung — erkennt periodische Störsignale, die einfache Prüfungen täuschen würden</li><li>Kamera-Frischefilter: nur Frames mit ≥85 % Pixeländerung; getrennter Frozen-Sensor-Wächter; 5-Minuten-Geduldsfenster für den Menschen</li><li>Würfel-Gesundheitsprüfungen: Mindest-Diversität, Schlagseiten-Erkennung</li><li>Entprellung (30 ms) und automatische Flankenwahl am Geigerzähler-Eingang; biasfreier GPIO</li></ul>
+<h3>Bei Anzeige und Abschluss</h3>
+<ul><li>Finale Offline-Prüfung unmittelbar vor der Seed-Anzeige: WLAN, Bluetooth und Ethernet werden erneut gemessen; bei zwischenzeitlicher (Re-)Aktivierung Sicherheitsabbruch mit Manipulationswarnung — der Seed erscheint nie</li><li>Mock-Modus zeigt grundsätzlich nur Wortindizes (Testseeds sind nicht abtippbar)</li><li>Papier-Verifikation: rote Anleitung (Wörter MIT Nummern notieren — Reihenfolge!), Wiedereingabe NUR vom Papier, toleranter Parser, exakter Abgleich mit Positionsdiagnose</li><li>Spurenfreier Abschluss: Bildschirm- und Scrollback-Löschung in terminalsicherer Reihenfolge (Home → 2J → 3J, mit clear-Fallback und Wiederholung), optionale Bash-History-Bereinigung</li><li>Keine Datei-Ausgabe zu irgendeinem Zeitpunkt: alle Geheimnisse existieren ausschließlich im RAM</li></ul>
+<h2>7. Theorie: Quantencomputer-Angriff — Hardware-Wallet-Seed vs. dieser 24-Wort-Seed</h2>
+<p>Ein zukünftiger fehlerkorrigierter Quantencomputer bedroht Bitcoin auf zwei getrennten Wegen, die man sauber auseinanderhalten muss:</p>
+<p>Weg A — Shor-Algorithmus gegen die Elliptische-Kurven-Kryptographie (secp256k1): Sobald der öffentliche Schlüssel einer Adresse bekannt ist (spätestens beim ersten Ausgeben, bei wiederverwendeten Adressen dauerhaft), könnte Shor daraus den privaten Schlüssel in polynomieller Zeit berechnen. Ehrliche Feststellung: Gegen diesen Weg schützt KEIN Seed-Generator der Welt — weder eine Hardware-Wallet noch dieses System —, denn er greift die Signaturkurve an, nicht die Seed-Entropie. Die Verteidigung liegt auf Protokollebene (künftige Post-Quantum-Signaturen) und in der Praxis: Adressen nicht wiederverwenden, Guthaben nach Bekanntwerden realer Quantenfähigkeiten auf neue Verfahren migrieren.</p>
+<p>Weg B — Grover-Algorithmus gegen die Seed-Entropie (Brute-Force): Grover beschleunigt unstrukturierte Suche quadratisch — die effektive Sicherheit einer n-Bit-Entropie sinkt auf n/2 Bit. Und genau hier trennt sich die Spreu vom Weizen:</p>
+<table><tr><th>Szenario</th><th>klassische Sicherheit</th><th>Quanten-Sicherheit (Grover)</th><th>Bewertung</th></tr>
+<tr><td>24 Wörter, volle 256 Bit (dieses System, nachgewiesen)</td><td>2^256</td><td>2^128</td><td>dauerhaft sicher — 2^128 gilt auch quantentechnisch als unerreichbar</td></tr>
+<tr><td>24 Wörter aus intakter Hardware-Wallet</td><td>2^256 (Herstellerangabe)</td><td>2^128</td><td>gleichwertig — SOFERN der RNG wirklich voll lieferte</td></tr>
+<tr><td>24 Wörter aus fehlerhaftem/manipuliertem RNG (real dokumentierte Fälle: reduzierte effektive Entropie, z. B. 64–128 Bit)</td><td>2^64–2^128</td><td>2^32–2^64</td><td>gefährdet bis trivial brechbar — und der Nutzer kann es nicht erkennen</td></tr>
+<tr><td>12 Wörter (128 Bit)</td><td>2^128</td><td>2^64</td><td>klassisch sicher, im Quantenzeitalter Grenzfall — daher hier 24 Wörter empfohlen</td></tr>
+</table>
+<p>Fazit: Der Vorteil dieses Systems im Quantenkontext liegt nicht in einer magischen Quantenresistenz der Signaturen (die hat niemand), sondern in der GARANTIE der vollen 256 Bit Eingangsentropie. Grover halbiert Exponenten — wer mit nachweisbaren 256 Bit startet, behält 128 Bit Quantenmarge; wer unwissentlich mit einem geschwächten RNG startete, fällt unter Grover möglicherweise in brechbare Bereiche. Die Mehrquellen-Architektur mit Transparenz-Modus und erzwungener Bilanz macht genau diese stille Schwächung unmöglich. Zusätzlich gilt: Solange eine Adresse unbenutzt ist (Public Key nur als Hash bekannt), schützt auch gegen Weg A vorerst die Hash-Barriere — ein Grund mehr für Adress-Hygiene.</p>
+<h2>8. Betriebsablauf (Kurzreferenz)</h2>
+<ul><li>Einrichtung (einmalig, online erlaubt): sudo python3 install_seedgen.py → sudo reboot</li><li>Start: sudo python3 btc_seedgen.py → Sprache wählen → Sicherheitsregeln bestätigen</li><li>Automatik: Funk-Abschaltung, Ethernet-Kabel ziehen (erzwungen), Swap aus, Healthcheck mit Erfolgssignal</li><li>Konfiguration: Modus (Standard/Transparenz), Wortzahl, Ereignisse/Frames/Würfe (Minima werden erzwungen; realistische Dauer aus gemessener Zählrate)</li><li>Phasen 1–4: HWRNG → Zerfall → Kamera (Hand bewegen!) → Würfel eingeben</li><li>Finale Offline-Prüfung → Seed-Anzeige → Wörter MIT Nummern auf Papier → Verifikation VOM PAPIER → Enter löscht Bildschirm+Scrollback → Terminal schließen</li><li>Empfehlung für den Ernstfall: 24 Wörter, ≥512 Zerfallsereignisse, 100 Würfe, Import-Verifikation auf zweitem Offline-Gerät (Electrum: Options → BIP39; Pfad m/84&#x27;/0&#x27;/0&#x27;)</li></ul>
+<h2>9. Grenzen und Restrisiken (ehrliche Betrachtung)</h2>
+<ul><li>Shor-Risiko der Signaturkurve bleibt bestehen (siehe Kap. 7) — protokollseitig, nicht generatorseitig lösbar</li><li>Python kann RAM nicht garantiert überschreiben (unveränderliche Objekte); Absicherung erfolgt über Swap-/Core-Dump-Sperre und Prozessende — für maximale Paranoia: Pi nach dem Lauf stromlos machen</li><li>Healthchecks erkennen Defekte, keine perfekt getarnte Chip-Manipulation — dagegen steht die Architektur (Würfel-HMAC), nicht die Statistik</li><li>Physische Sicherheit des Papier-Backups liegt außerhalb des Systems (Metallplatte, sichere Verwahrung, ggf. Passphrase als 25. Wort in der Wallet)</li><li>Der Monitor ist Teil der Vertrauenskette (daher Smart-TV-Verbot in den Regeln)</li><li>Ein einzelner Lauf ersetzt keine organisatorische Sicherheit: Testläufe mit Wegwerf-Seeds vor dem Ernstfall bleiben Pflicht</li></ul>
+<h2>10. Integrität und Reproduzierbarkeit</h2>
+<p>Jede Skriptversion wird über ihre SHA-256-Prüfsumme identifiziert; nach jeder Übertragung auf den Pi gilt: sha256sum btc_seedgen.py vergleichen und python3 btc_seedgen.py --selftest ausführen (prüft BIP39-Vektoren, Kombinierer und Wortliste). Im Transparenz-Modus ist jeder Zwischenwert (H_hw, H_dec, H_cam, H_os, H_dice, POOL, FINAL, ENTROPY) angezeigt und mit Standardwerkzeugen unabhängig nachrechenbar — das System verlangt an keiner Stelle Vertrauen in unbelegte Behauptungen.</p>
+<h2>11. Glossar</h2>
+<table><tr><th>Begriff</th><th>Bedeutung</th></tr>
+<tr><td>BIP39</td><td>Standard zur Kodierung von Entropie als merkbare Wortfolge inkl. Checksumme</td></tr>
+<tr><td>Entropie</td><td>Maß der Unvorhersagbarkeit; hier konservativ in Bit bilanziert</td></tr>
+<tr><td>HMAC</td><td>Schlüsselabhängige Hash-Konstruktion; hier als robuster Zwei-Quellen-Kombinierer</td></tr>
+<tr><td>Domain-Separation</td><td>Eindeutige Kennzeichnung der Hash-Eingaben, verhindert Format-Verwechslung</td></tr>
+<tr><td>CPM</td><td>Counts per minute — Zählrate des Geigerzählers</td></tr>
+<tr><td>Poisson-Prozess</td><td>Statistik unabhängiger Zufallsereignisse; Kennzeichen echten Zerfalls (CV ≈ 1, exponentielle Intervalle)</td></tr>
+<tr><td>Grover/Shor</td><td>Quantenalgorithmen: quadratische Suche-Beschleunigung bzw. Brechen von Public-Key-Kryptographie</td></tr>
+<tr><td>Air-Gap</td><td>Physische Trennung eines Systems von allen Netzwerken</td></tr>
+</table>
+<h2>12. Lizenz und Haftungsausschluss</h2>
+<p>Dieses Projekt (Quellcode, Installationsskript und diese Dokumentation) steht unter der MIT License — Copyright (c) 2026 Quantum Seed Generator Project. Jeder darf die Software kostenlos nutzen, pruefen, veraendern und weiterverbreiten; einzige Bedingung ist die Beibehaltung des Lizenz- und Copyright-Hinweises. Der vollstaendige Lizenztext liegt in der Datei LICENSE des Repositories. Die Software wird &#x27;WIE BESEHEN&#x27; ohne jede Gewaehrleistung bereitgestellt (AS IS, without warranty of any kind).</p>
+<p>Dieses System ist ein Selbstbau-Projekt für technisch versierte Anwender. Die Verantwortung für Betrieb, Verwahrung des Backups und den Umgang mit Kryptowährungen liegt vollständig beim Nutzer. Vor der Verwendung mit echten Werten sind eigene Testläufe und die Import-Verifikation auf einem unabhängigen Offline-Gerät zwingend.</p>
+</body></html>
